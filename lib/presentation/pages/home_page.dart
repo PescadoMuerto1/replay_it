@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:replay_it/presention/widgets/camera_preview_widget.dart';
+import 'package:replay_it/presentation/widgets/camera_recorder_widget.dart';
 
 class HomePage extends StatelessWidget {
   @override
@@ -9,7 +9,7 @@ class HomePage extends StatelessWidget {
         title: Text('Home Page'),
       ),
       body: Center(
-        child: CameraPreviewWidget(),
+        child: CameraRecorderWidget(),
       ),
     );
   }

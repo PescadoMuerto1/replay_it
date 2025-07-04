@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:replay_it/presention/pages/home_page.dart';
+import 'package:replay_it/presentation/pages/home_page.dart';
 
 void main() {
   runApp(const MyApp());
