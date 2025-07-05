@@ -13,6 +13,7 @@ Future<void> convertFramesToVideo(
       Size videoDimensions,
       ) async {
     try {
+      print('Converting frames to video with frame rate: $frameRate and dimensions: $videoDimensions');
       // Create a temporary directory to store the YUV420 file
       final tempDir = await getTemporaryDirectory();
       final tempFile = File('${tempDir.path}/temp_video.yuv');

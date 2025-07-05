@@ -15,6 +15,7 @@ class CameraRecorderController {
   late int timestampEnd;
 
   late double framesPerSecond;
+  int videoTimeLimit = 6; // seconds
 
   Future<void> initializeCamera() async {
     final cameras = await availableCameras();
@@ -33,6 +34,11 @@ class CameraRecorderController {
     _cameraController.startImageStream((CameraImage image) {
       if (_isRecording) {
         _frameBuffer.add(image);
+        final currentTimestamp = DateTime.now().millisecondsSinceEpoch;
+
+        if (currentTimestamp > timestampStart + videoTimeLimit * 1000) {
+          _frameBuffer.removeAt(0);
+        }
       }
     });
     _isRecording = true;
@@ -41,13 +47,18 @@ class CameraRecorderController {
   Future<void> stopRecording() async {
     if (!_cameraController.value.isInitialized || !_isRecording) return;
     await _cameraController.stopImageStream();
+    _isRecording = false;
+  }
+
+  Future<void> saveRecentRecording() async {
+    if (_frameBuffer.isEmpty) return;
     timestampEnd = DateTime.now().millisecondsSinceEpoch;
     await convertFramesToVideo(
       _frameBuffer,
       getVideoFrameRate(timestampEnd, timestampStart, _frameBuffer.length),
       getVideoDimensions(),
     );
-    _isRecording = false;
+    print("Saving recent recording...");
   }
 
   Size getVideoDimensions() {
@@ -61,7 +72,8 @@ class CameraRecorderController {
   getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
     if (_cameraController.value.isInitialized) {
       double videoDuration = ((timestampEnd - timestampStart) / 1000);
-      return (framesLength / videoDuration);
+      double adjustedVideoDuration =  videoDuration < videoTimeLimit.toDouble() ? videoDuration : videoTimeLimit.toDouble(); 
+      return (framesLength / adjustedVideoDuration);
     }
     return;
   }

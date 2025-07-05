@@ -47,6 +47,12 @@ class _CameraRecorderWidgetState extends State<CameraRecorderWidget> {
         }
         setState(() {}); // Update the UI after recording state changes.
       },
+      onSaveResentRecordingPressed: () async {
+        _cameraRecorderController.saveRecentRecording();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saving...')),
+        );
+      },
     );
   }
 }
