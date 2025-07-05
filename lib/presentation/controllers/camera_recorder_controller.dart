@@ -17,6 +17,10 @@ class CameraRecorderController {
   bool get isRecording => _isRecording;
 
   final List<CameraImage> _frameBuffer = [];
+  late int timestampStart;
+  late int timestampEnd;
+  late double videoDuration;
+  late double framesPerSecond;
 
   Future<void> initializeCamera() async {
     final cameras = await availableCameras();
@@ -30,6 +34,7 @@ class CameraRecorderController {
 
   Future<void> startRecording() async {
     if (!_cameraController.value.isInitialized || _isRecording) return;
+        timestampStart = DateTime.now().millisecondsSinceEpoch;
     _frameBuffer.clear();
     _cameraController.startImageStream((CameraImage image){
       if (_isRecording) {
@@ -42,6 +47,7 @@ class CameraRecorderController {
   Future<void> stopRecording() async {
     if (!_cameraController.value.isInitialized || !_isRecording) return;
     await _cameraController.stopImageStream();
+    timestampEnd = DateTime.now().millisecondsSinceEpoch;
     convertFramesToVideo(_frameBuffer);
     _isRecording = false;
   }
@@ -99,8 +105,14 @@ class CameraRecorderController {
       final outputPath =
           '${(await getExternalStorageDirectory())!.path}/video-${DateTime.now().microsecondsSinceEpoch}.mp4';
 
+      videoDuration = ((timestampEnd - timestampStart) / 1000);
+      print('video duration: $videoDuration s');
+      print('video timestamp: $timestampStart k $timestampEnd');
+      framesPerSecond = (frames.length / videoDuration);
+      print ('frames per second: $framesPerSecond');
+
       final command =
-          '-loglevel debug -f rawvideo -pix_fmt nv21 -s ${width}x${height} -r 30 -color_range 2 -i ${tempFile.path} -vf "format=yuv420p" -c:v libx264 -crf 25 $outputPath'; // Restored -crf 25
+          '-loglevel debug -f rawvideo -pix_fmt nv21 -s ${width}x${height} -r $framesPerSecond -color_range 2 -i ${tempFile.path} -vf "format=yuv420p" -c:v libx264 -crf 25 $outputPath'; // Restored -crf 25
 
       print('frames total ${frames.length}');
 
