@@ -52,10 +52,10 @@ class CameraRecorderController {
 
   Size getVideoDimensions() {
     final resolution = _cameraController.value.previewSize;
-    if (resolution != null) {
-      return Size(resolution.width, resolution.height);
+    if (resolution == null) {
+      throw Exception("Camera preview size is not available.");
     }
-    return Size(0, 0);
+    return Size(resolution.width, resolution.height);
   }
 
   getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
