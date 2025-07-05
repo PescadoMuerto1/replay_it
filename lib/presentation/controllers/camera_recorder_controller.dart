@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:replay_it/domain/use_cases/convertFrameToVideo.dart';
 
-
 class CameraRecorderController {
   late CameraController _cameraController;
   bool _isRecording = false;
@@ -14,7 +13,7 @@ class CameraRecorderController {
   final List<CameraImage> _frameBuffer = [];
   late int timestampStart;
   late int timestampEnd;
- 
+
   late double framesPerSecond;
 
   Future<void> initializeCamera() async {
@@ -29,9 +28,9 @@ class CameraRecorderController {
 
   Future<void> startRecording() async {
     if (!_cameraController.value.isInitialized || _isRecording) return;
-        timestampStart = DateTime.now().millisecondsSinceEpoch;
+    timestampStart = DateTime.now().millisecondsSinceEpoch;
     _frameBuffer.clear();
-    _cameraController.startImageStream((CameraImage image){
+    _cameraController.startImageStream((CameraImage image) {
       if (_isRecording) {
         _frameBuffer.add(image);
       }
@@ -43,9 +42,13 @@ class CameraRecorderController {
     if (!_cameraController.value.isInitialized || !_isRecording) return;
     await _cameraController.stopImageStream();
     timestampEnd = DateTime.now().millisecondsSinceEpoch;
-    convertFramesToVideo(_frameBuffer, getVideoFrameRate(timestampEnd, timestampStart, _frameBuffer.length), getVideoDimensions());
+    await convertFramesToVideo(
+      _frameBuffer,
+      getVideoFrameRate(timestampEnd, timestampStart, _frameBuffer.length),
+      getVideoDimensions(),
+    );
     _isRecording = false;
-  } 
+  }
 
   Size getVideoDimensions() {
     final resolution = _cameraController.value.previewSize;
@@ -54,11 +57,11 @@ class CameraRecorderController {
     }
     return Size(0, 0);
   }
-    
-  getVideoFrameRate(timestampEnd,timestampStart,framesLength){
+
+  getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
     if (_cameraController.value.isInitialized) {
-     double videoDuration = ((timestampEnd - timestampStart) / 1000);
-           return(framesLength / videoDuration);
+      double videoDuration = ((timestampEnd - timestampStart) / 1000);
+      return (framesLength / videoDuration);
     }
     return;
   }
