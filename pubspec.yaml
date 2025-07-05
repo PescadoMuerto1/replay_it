@@ -35,6 +35,9 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   camera: ^0.11.1
+  ffmpeg_kit_flutter_new: ^2.0.0
+  path_provider: ^2.1.5
+  image_gallery_saver_plus: ^4.0.1
 
 dev_dependencies:
   flutter_test:
