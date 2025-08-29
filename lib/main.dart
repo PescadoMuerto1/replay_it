@@ -12,7 +12,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'play_shot',
+      title: 'ReplayIt',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: HomePage(),
     );
