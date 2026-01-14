@@ -102,8 +102,8 @@ Future<void> convertFramesToVideo(
   }
 
 // Hybrid chunk-based conversion function
-Future<String?> convertChunksToVideo(List<String> chunkFiles, double frameRate, Size dimensions) async {
-  print('Converting ${chunkFiles.length} chunk files to video with frame rate: $frameRate and dimensions: $dimensions');
+Future<String?> convertChunksToVideo(List<String> chunkFiles, double frameRate, Size dimensions, int rotation) async {
+  print('Converting ${chunkFiles.length} chunk files to video with frame rate: $frameRate, dimensions: $dimensions, rotation: $rotation°');
   
   try {
     // Create a snapshot of the chunk files to avoid concurrent modification
@@ -144,9 +144,20 @@ Future<String?> convertChunksToVideo(List<String> chunkFiles, double frameRate, 
       return null;
     }
 
-    // Build FFmpeg command
+    // Build rotation filter based on camera sensor orientation
+    String rotationFilter = '';
+    if (rotation == 90) {
+      rotationFilter = 'transpose=1,'; // 90° clockwise
+    } else if (rotation == 180) {
+      rotationFilter = 'transpose=1,transpose=1,'; // 180°
+    } else if (rotation == 270) {
+      rotationFilter = 'transpose=2,'; // 270° (or -90° counter-clockwise)
+    }
+    
+    // Build FFmpeg command with rotation filter
+    final videoFilter = '${rotationFilter}format=yuv420p';
     final command =
-        '-loglevel debug -f rawvideo -pix_fmt nv21 -s ${dimensions.width.toInt()}x${dimensions.height.toInt()} -r $frameRate -color_range 2 -i $concatenatedFilePath -vf "format=yuv420p" -c:v libx264 -crf 18 $outputVideoPath';
+        '-loglevel debug -f rawvideo -pix_fmt nv21 -s ${dimensions.width.toInt()}x${dimensions.height.toInt()} -r $frameRate -color_range 2 -i $concatenatedFilePath -vf "$videoFilter" -c:v libx264 -crf 18 $outputVideoPath';
 
     print('DEBUG: Executing FFmpeg command');
     final session = await FFmpegKit.execute(command);

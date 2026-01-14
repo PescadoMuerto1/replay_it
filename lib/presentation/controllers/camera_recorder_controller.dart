@@ -8,6 +8,7 @@ import 'package:replay_it/domain/use_cases/convertFrameToVideo.dart';
 
 class CameraRecorderController {
   late CameraController _cameraController;
+  late CameraDescription _cameraDescription;
   bool _isRecording = false;
 
   CameraController get cameraController => _cameraController;
@@ -35,8 +36,9 @@ class CameraRecorderController {
 
   Future<void> initializeCamera() async {
     final cameras = await availableCameras();
+    _cameraDescription = cameras.last;
     _cameraController = CameraController(
-      cameras.last,
+      _cameraDescription,
       ResolutionPreset.veryHigh, // Highest quality
       fps: 30,
     );
@@ -106,6 +108,7 @@ class CameraRecorderController {
       _chunkFiles,
       getVideoFrameRate(timestampEnd, timestampStart, _getTotalFrameCount()),
       getVideoDimensions(),
+      getCameraRotation(),
     );
     print("Video conversion completed!");
   }
@@ -116,6 +119,12 @@ class CameraRecorderController {
       throw Exception("Camera preview size is not available.");
     }
     return Size(resolution.width, resolution.height);
+  }
+
+  int getCameraRotation() {
+    // Get sensor orientation from camera description (0, 90, 180, or 270 degrees)
+    // This tells us how the camera sensor is mounted relative to the device
+    return _cameraDescription.sensorOrientation;
   }
 
   double getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
