@@ -56,6 +56,8 @@ class CameraRecorderController {
     // Clear existing frame files
     await _clearFrameBuffer();
     
+    _isRecording = true;
+    
     _cameraController.startImageStream((CameraImage image) async {
       if (_isRecording) {
         // Add frame to RAM buffer
@@ -69,7 +71,6 @@ class CameraRecorderController {
         }
       }
     });
-    _isRecording = true;
   }
 
   Future<void> stopRecording() async {
