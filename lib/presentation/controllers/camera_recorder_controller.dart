@@ -1,6 +1,9 @@
 import 'dart:ui';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:replay_it/domain/use_cases/convertFrameToVideo.dart';
 
 class CameraRecorderController {
@@ -10,34 +13,59 @@ class CameraRecorderController {
   CameraController get cameraController => _cameraController;
   bool get isRecording => _isRecording;
 
-  final List<CameraImage> _frameBuffer = [];
+  // Hybrid RAM + Disk circular buffer
+  late Directory _tempDir;
+  
+  // RAM buffer for current 5-second chunk
+  final List<Uint8List> _ramBuffer = [];
+  
+  // Disk buffer for previous chunks
+  final List<String> _chunkFiles = [];
+  
   late int timestampStart;
   late int timestampEnd;
 
   late double framesPerSecond;
-  int videoTimeLimit = 6; // seconds
+  int videoTimeLimit = 60; // seconds - now supports up to 1 minute
+  int framesPerChunk = 150; // 5 seconds * 30 fps
+  int maxChunks = 12; // 12 chunks = 60 seconds total
 
   Future<void> initializeCamera() async {
     final cameras = await availableCameras();
     _cameraController = CameraController(
       cameras.last,
-      ResolutionPreset.low,
+      ResolutionPreset.veryHigh, // Highest quality
       fps: 30,
     );
     await _cameraController.initialize();
+    
+    // Set up temporary directory for frame storage
+    _tempDir = await getTemporaryDirectory();
+    final bufferDir = Directory('${_tempDir.path}/frame_buffer');
+    if (await bufferDir.exists()) {
+      await bufferDir.delete(recursive: true);
+    }
+    await bufferDir.create();
+    _tempDir = bufferDir;
   }
 
   Future<void> startRecording() async {
     if (!_cameraController.value.isInitialized || _isRecording) return;
     timestampStart = DateTime.now().millisecondsSinceEpoch;
-    _frameBuffer.clear();
-    _cameraController.startImageStream((CameraImage image) {
+    
+    // Clear existing frame files
+    await _clearFrameBuffer();
+    
+    _cameraController.startImageStream((CameraImage image) async {
       if (_isRecording) {
-        _frameBuffer.add(image);
-        final currentTimestamp = DateTime.now().millisecondsSinceEpoch;
-
-        if (currentTimestamp > timestampStart + videoTimeLimit * 1000) {
-          _frameBuffer.removeAt(0);
+        // Add frame to RAM buffer
+        final yuvData = _convertCameraImageToYUV(image);
+        _ramBuffer.add(yuvData);
+        
+        // When RAM buffer hits 5 seconds (150 frames), write chunk to disk
+        if (_ramBuffer.length >= framesPerChunk) {
+          await _writeChunkToDisk();
+          _ramBuffer.clear();
         }
       }
     });
@@ -51,14 +79,31 @@ class CameraRecorderController {
   }
 
   Future<void> saveRecentRecording() async {
-    if (_frameBuffer.isEmpty) return;
+    if (_chunkFiles.isEmpty && _ramBuffer.isEmpty) {
+      print("No recording data available to save");
+      return;
+    }
+    
     timestampEnd = DateTime.now().millisecondsSinceEpoch;
-    await convertFramesToVideo(
-      _frameBuffer,
-      getVideoFrameRate(timestampEnd, timestampStart, _frameBuffer.length),
+    
+    // If there's data in RAM buffer, write it as final chunk
+    if (_ramBuffer.isNotEmpty) {
+      print("Writing current RAM buffer (${_ramBuffer.length} frames) to disk...");
+      await _writeCurrentRamBufferToDisk();
+    }
+    
+    if (_chunkFiles.isEmpty) {
+      print("No chunk files available after processing RAM buffer");
+      return;
+    }
+    
+    print("Starting video conversion with ${_chunkFiles.length} chunks...");
+    await convertChunksToVideo(
+      _chunkFiles,
+      getVideoFrameRate(timestampEnd, timestampStart, _getTotalFrameCount()),
       getVideoDimensions(),
     );
-    print("Saving recent recording...");
+    print("Video conversion completed!");
   }
 
   Size getVideoDimensions() {
@@ -69,16 +114,108 @@ class CameraRecorderController {
     return Size(resolution.width, resolution.height);
   }
 
-  getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
+  double getVideoFrameRate(timestampEnd, timestampStart, framesLength) {
     if (_cameraController.value.isInitialized) {
       double videoDuration = ((timestampEnd - timestampStart) / 1000);
-      double adjustedVideoDuration =  videoDuration < videoTimeLimit.toDouble() ? videoDuration : videoTimeLimit.toDouble(); 
+      double adjustedVideoDuration = videoDuration < videoTimeLimit.toDouble() ? videoDuration : videoTimeLimit.toDouble();
       return (framesLength / adjustedVideoDuration);
     }
-    return;
+    return 30.0; // Default fallback
+  }
+
+  Future<void> _writeChunkToDisk() async {
+    try {
+      final chunkPath = '${_tempDir.path}/chunk_${DateTime.now().millisecondsSinceEpoch}.yuv';
+      final chunkFile = File(chunkPath);
+      
+      // Write entire 5-second chunk at once
+      final sink = chunkFile.openWrite();
+      for (final frameData in _ramBuffer) {
+        sink.add(frameData);
+      }
+      await sink.close();
+      
+      _chunkFiles.add(chunkPath);
+      
+      // Remove oldest chunk when buffer is full
+      if (_chunkFiles.length > maxChunks) {
+        final oldestChunk = _chunkFiles.removeAt(0);
+        final oldFile = File(oldestChunk);
+        if (await oldFile.exists()) {
+          await oldFile.delete();
+        }
+      }
+    } catch (e) {
+      print('Error writing chunk to disk: $e');
+    }
+  }
+  
+  Future<void> _writeCurrentRamBufferToDisk() async {
+    if (_ramBuffer.isEmpty) return;
+    
+    final chunkPath = '${_tempDir.path}/final_chunk_${DateTime.now().millisecondsSinceEpoch}.yuv';
+    final chunkFile = File(chunkPath);
+    
+    final sink = chunkFile.openWrite();
+    for (final frameData in _ramBuffer) {
+      sink.add(frameData);
+    }
+    await sink.close();
+    
+    _chunkFiles.add(chunkPath);
+  }
+  
+  int _getTotalFrameCount() {
+    return (_chunkFiles.length * framesPerChunk) + _ramBuffer.length;
+  }
+
+  Uint8List _convertCameraImageToYUV(CameraImage image) {
+    final yPlane = image.planes[0];
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+    final width = image.width;
+    final height = image.height;
+    final yRowStride = yPlane.bytesPerRow;
+    final uvRowStride = uPlane.bytesPerRow;
+    final uvPixelStride = uPlane.bytesPerPixel ?? 1;
+
+    final yuvData = <int>[];
+
+    // Write Y plane (Luma)
+    for (int row = 0; row < height; row++) {
+      yuvData.addAll(
+          yPlane.bytes.sublist(row * yRowStride, row * yRowStride + width));
+    }
+
+    // Write UV planes (Chroma) in NV21 format
+    for (int row = 0; row < height ~/ 2; row++) {
+      for (int col = 0; col < width ~/ 2; col++) {
+        int uvIndex = row * uvRowStride + col * uvPixelStride;
+        yuvData.add(vPlane.bytes[uvIndex]);
+        yuvData.add(uPlane.bytes[uvIndex]);
+      }
+    }
+
+    return Uint8List.fromList(yuvData);
+  }
+
+  Future<void> _clearFrameBuffer() async {
+    // Clear RAM buffer
+    _ramBuffer.clear();
+    
+    // Delete existing chunk files
+    for (final chunkPath in _chunkFiles) {
+      final chunkFile = File(chunkPath);
+      if (await chunkFile.exists()) {
+        await chunkFile.delete();
+      }
+    }
+    _chunkFiles.clear();
   }
 
   void dispose() {
     _cameraController.dispose();
+    // Clean up temporary files and RAM buffer
+    _clearFrameBuffer();
   }
 }

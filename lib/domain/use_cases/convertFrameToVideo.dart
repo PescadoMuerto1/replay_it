@@ -100,3 +100,87 @@ Future<void> convertFramesToVideo(
       print('Error: $e');
     }
   }
+
+// Hybrid chunk-based conversion function
+Future<String?> convertChunksToVideo(List<String> chunkFiles, double frameRate, Size dimensions) async {
+  print('Converting ${chunkFiles.length} chunk files to video with frame rate: $frameRate and dimensions: $dimensions');
+  
+  try {
+    // Create a snapshot of the chunk files to avoid concurrent modification
+    final chunkFilesCopy = List<String>.from(chunkFiles);
+    print('DEBUG: Created snapshot of ${chunkFilesCopy.length} chunk files');
+    
+    final directory = await getTemporaryDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final concatenatedFilePath = '${directory.path}/concatenated_$timestamp.yuv';
+    final outputVideoPath = '${directory.path}/output_$timestamp.mp4';
+
+    print('DEBUG: Creating concatenated file at: $concatenatedFilePath');
+    print('DEBUG: Output video path: $outputVideoPath');
+
+    // Concatenate all chunk files into one YUV file
+    final concatenatedFile = File(concatenatedFilePath);
+    final sink = concatenatedFile.openWrite();
+
+    print('DEBUG: Starting chunk concatenation...');
+    for (final chunkPath in chunkFilesCopy) {
+      final chunkFile = File(chunkPath);
+      if (await chunkFile.exists()) {
+        print('DEBUG: Reading chunk file: $chunkPath');
+        final chunkData = await chunkFile.readAsBytes();
+        sink.add(chunkData);
+        print('DEBUG: Added ${chunkData.length} bytes from chunk');
+      } else {
+        print('DEBUG: WARNING - Chunk file does not exist: $chunkPath');
+      }
+    }
+
+    await sink.close();
+    print('DEBUG: Finished concatenating chunks. File size: ${await concatenatedFile.length()} bytes');
+
+    // Verify concatenated file exists
+    if (!await concatenatedFile.exists()) {
+      print('ERROR: Concatenated file was not created');
+      return null;
+    }
+
+    // Build FFmpeg command
+    final command =
+        '-loglevel debug -f rawvideo -pix_fmt nv21 -s ${dimensions.width.toInt()}x${dimensions.height.toInt()} -r $frameRate -color_range 2 -i $concatenatedFilePath -vf "format=yuv420p" -c:v libx264 -crf 18 $outputVideoPath';
+
+    print('DEBUG: Executing FFmpeg command');
+    final session = await FFmpegKit.execute(command);
+
+    // Check FFmpeg result
+    final returnCode = await session.getReturnCode();
+    final logs = await session.getAllLogs();
+
+    print('DEBUG: FFmpeg logs:');
+    for (final log in logs) {
+      print('FFmpeg: ${log.getMessage()}');
+    }
+
+    if (ReturnCode.isSuccess(returnCode)) {
+      print("DEBUG: FFmpeg conversion successful");
+      
+      // Save to gallery
+      print('DEBUG: Saving video to gallery...');
+      final result = await ImageGallerySaverPlus.saveFile(outputVideoPath);
+      print('DEBUG: Gallery save result: $result');
+      
+      // Clean up temporary files
+      await concatenatedFile.delete();
+      await File(outputVideoPath).delete();
+      
+      return outputVideoPath;
+    } else {
+      print("ERROR: FFmpeg conversion failed with return code: $returnCode");
+      await concatenatedFile.delete();
+      return null;
+    }
+  } catch (e, stackTrace) {
+    print('ERROR in convertChunksToVideo: $e');
+    print('Stack trace: $stackTrace');
+    return null;
+  }
+}
