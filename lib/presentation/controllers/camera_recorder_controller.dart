@@ -22,6 +22,9 @@ class CameraRecorderController {
   // Disk buffer for previous chunks
   final List<String> _chunkFiles = [];
   
+  // Track actual frame counts per chunk (for accurate frame rate calculation)
+  final List<int> _chunkFrameCounts = [];
+  
   late int timestampStart;
   late int timestampEnd;
 
@@ -136,11 +139,14 @@ class CameraRecorderController {
       }
       await sink.close();
       
+      final frameCount = _ramBuffer.length;
       _chunkFiles.add(chunkPath);
+      _chunkFrameCounts.add(frameCount);
       
       // Remove oldest chunk when buffer is full
       if (_chunkFiles.length > maxChunks) {
         final oldestChunk = _chunkFiles.removeAt(0);
+        _chunkFrameCounts.removeAt(0);
         final oldFile = File(oldestChunk);
         if (await oldFile.exists()) {
           await oldFile.delete();
@@ -163,11 +169,15 @@ class CameraRecorderController {
     }
     await sink.close();
     
+    final frameCount = _ramBuffer.length;
     _chunkFiles.add(chunkPath);
+    _chunkFrameCounts.add(frameCount);
   }
   
   int _getTotalFrameCount() {
-    return (_chunkFiles.length * framesPerChunk) + _ramBuffer.length;
+    // Sum actual frame counts from all chunks plus current RAM buffer
+    final chunkFramesTotal = _chunkFrameCounts.fold(0, (sum, count) => sum + count);
+    return chunkFramesTotal + _ramBuffer.length;
   }
 
   Uint8List _convertCameraImageToYUV(CameraImage image) {
@@ -212,6 +222,7 @@ class CameraRecorderController {
       }
     }
     _chunkFiles.clear();
+    _chunkFrameCounts.clear();
   }
 
   void dispose() {
