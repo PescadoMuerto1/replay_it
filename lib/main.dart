@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:replay_it/presentation/pages/home_page.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MyApp( ));
 }
 
 class MyApp extends StatelessWidget {
