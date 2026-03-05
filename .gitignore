@@ -46,3 +46,4 @@ app.*.map.json
 
 # AI coding instructions
 .github/copilot-instructions.md
+ARCHITECTURE_ANALYSIS.md
