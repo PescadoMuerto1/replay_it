@@ -3,8 +3,55 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:replay_it/domain/use_cases/convertFrameToVideo.dart';
+
+// Serializable data structure for frame conversion in isolate
+class _FrameData {
+  final Uint8List yPlaneBytes;
+  final Uint8List uPlaneBytes;
+  final Uint8List vPlaneBytes;
+  final int width;
+  final int height;
+  final int yRowStride;
+  final int uvRowStride;
+  final int uvPixelStride;
+
+  _FrameData({
+    required this.yPlaneBytes,
+    required this.uPlaneBytes,
+    required this.vPlaneBytes,
+    required this.width,
+    required this.height,
+    required this.yRowStride,
+    required this.uvRowStride,
+    required this.uvPixelStride,
+  });
+}
+
+// Static function for isolate (must be top-level)
+Uint8List _convertFrameDataToYUV(_FrameData frameData) {
+  final yuvData = <int>[];
+
+  // Write Y plane (Luma)
+  for (int row = 0; row < frameData.height; row++) {
+    final start = row * frameData.yRowStride;
+    final end = start + frameData.width;
+    yuvData.addAll(frameData.yPlaneBytes.sublist(start, end));
+  }
+
+  // Write UV planes (Chroma) in NV21 format
+  for (int row = 0; row < frameData.height ~/ 2; row++) {
+    for (int col = 0; col < frameData.width ~/ 2; col++) {
+      int uvIndex = row * frameData.uvRowStride + col * frameData.uvPixelStride;
+      yuvData.add(frameData.vPlaneBytes[uvIndex]);
+      yuvData.add(frameData.uPlaneBytes[uvIndex]);
+    }
+  }
+
+  return Uint8List.fromList(yuvData);
+}
 
 class CameraRecorderController {
   late CameraController _cameraController;
@@ -65,13 +112,28 @@ class CameraRecorderController {
     
     _cameraController.startImageStream((CameraImage image) async {
       if (_isRecording) {
-        // Add frame to RAM buffer
-        final yuvData = _convertCameraImageToYUV(image);
+        // Extract frame data quickly (just copying references, not converting yet)
+        final frameData = _FrameData(
+          yPlaneBytes: Uint8List.fromList(image.planes[0].bytes),
+          uPlaneBytes: Uint8List.fromList(image.planes[1].bytes),
+          vPlaneBytes: Uint8List.fromList(image.planes[2].bytes),
+          width: image.width,
+          height: image.height,
+          yRowStride: image.planes[0].bytesPerRow,
+          uvRowStride: image.planes[1].bytesPerRow,
+          uvPixelStride: image.planes[1].bytesPerPixel ?? 1,
+        );
+        
+        // Convert to YUV in isolate (non-blocking)
+        final yuvData = await compute(_convertFrameDataToYUV, frameData);
         _ramBuffer.add(yuvData);
         
         // When RAM buffer hits 5 seconds (150 frames), write chunk to disk
         if (_ramBuffer.length >= framesPerChunk) {
-          await _writeChunkToDisk();
+          // Don't await here - queue the write to avoid blocking
+          _writeChunkToDisk().catchError((e) {
+            print('Error writing chunk: $e');
+          });
           _ramBuffer.clear();
         }
       }
@@ -187,36 +249,6 @@ class CameraRecorderController {
     // Sum actual frame counts from all chunks plus current RAM buffer
     final chunkFramesTotal = _chunkFrameCounts.fold(0, (sum, count) => sum + count);
     return chunkFramesTotal + _ramBuffer.length;
-  }
-
-  Uint8List _convertCameraImageToYUV(CameraImage image) {
-    final yPlane = image.planes[0];
-    final uPlane = image.planes[1];
-    final vPlane = image.planes[2];
-    final width = image.width;
-    final height = image.height;
-    final yRowStride = yPlane.bytesPerRow;
-    final uvRowStride = uPlane.bytesPerRow;
-    final uvPixelStride = uPlane.bytesPerPixel ?? 1;
-
-    final yuvData = <int>[];
-
-    // Write Y plane (Luma)
-    for (int row = 0; row < height; row++) {
-      yuvData.addAll(
-          yPlane.bytes.sublist(row * yRowStride, row * yRowStride + width));
-    }
-
-    // Write UV planes (Chroma) in NV21 format
-    for (int row = 0; row < height ~/ 2; row++) {
-      for (int col = 0; col < width ~/ 2; col++) {
-        int uvIndex = row * uvRowStride + col * uvPixelStride;
-        yuvData.add(vPlane.bytes[uvIndex]);
-        yuvData.add(uPlane.bytes[uvIndex]);
-      }
-    }
-
-    return Uint8List.fromList(yuvData);
   }
 
   Future<void> _clearFrameBuffer() async {
